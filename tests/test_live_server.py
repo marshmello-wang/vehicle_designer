@@ -40,14 +40,9 @@ def _server_available() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _server_available(), reason="Live server not reachable at LIVE_SERVER_BASE_URL/localhost"
-)
-
-
 def test_live_text_to_image_candidates():
     base = BASE_URL.rstrip('/')
-    with httpx.Client(timeout=100.0) as client:
+    with httpx.Client(timeout=10.0) as client:
         # create a project
         r = _request(client, "POST", f"{base}/api/projects/create", json={"name": "live"})
         assert r.status_code == 200, r.text
@@ -75,7 +70,7 @@ def test_live_text_to_image_candidates():
 
 def test_live_projects_endpoints():
     base = BASE_URL.rstrip('/')
-    with httpx.Client(timeout=100.0) as client:
+    with httpx.Client(timeout=10.0) as client:
         # create
         r = _request(client, "POST", f"{base}/api/projects/create", json={"name": "proj-live"})
         assert r.status_code == 200, r.text
@@ -97,7 +92,7 @@ def test_live_projects_endpoints():
 
 def test_live_versions_endpoints_flow():
     base = BASE_URL.rstrip('/')
-    with httpx.Client(timeout=100.0) as client:
+    with httpx.Client(timeout=10.0) as client:
         # project
         r = _request(client, "POST", f"{base}/api/projects/create", json={"name": "ver-live"})
         assert r.status_code == 200, r.text

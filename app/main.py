@@ -4,6 +4,7 @@ import os
 import logging
 import time
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from app.routes.projects import router as projects_router
 from app.routes.generate import router as generate_router
 from app.routes.versions import router as versions_router
@@ -23,6 +24,27 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Vehicle Designer API", version="0.1.0")
 
     logger = logging.getLogger("app.middleware")
+
+    # CORS support (allow-all by default; override via env)
+    origins_env = os.getenv("CORS_ALLOW_ORIGINS", "*").strip()
+    methods_env = os.getenv("CORS_ALLOW_METHODS", "*").strip()
+    headers_env = os.getenv("CORS_ALLOW_HEADERS", "*").strip()
+
+    if origins_env == "*":
+        allow_origins = ["*"]
+    else:
+        allow_origins = [o.strip() for o in origins_env.split(",") if o.strip()]
+
+    allow_methods = ["*"] if methods_env == "*" else [m.strip().upper() for m in methods_env.split(",") if m.strip()]
+    allow_headers = ["*"] if headers_env == "*" else [h.strip() for h in headers_env.split(",") if h.strip()]
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allow_origins,
+        allow_credentials=True,
+        allow_methods=allow_methods,
+        allow_headers=allow_headers,
+    )
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
