@@ -1,0 +1,66 @@
+# Install dependencies (run in your environment)
+# pip install 'volcengine-python-sdk[ark]' requests toml
+
+# Copy config template and fill your API key
+# cp config.toml.example config.toml
+
+# 1) Seedream 4.0: multi-image fusion (two local files), count=1 (default)
+python -m src.ark_image_cli \
+  --model doubao-seedream-4-0-250828 \
+  --prompt "将图1的服装换为图2的服装" \
+  --images input/a.png input/b.png \
+  --size 2K \
+  --sequential-image-generation disabled \
+  --response-format url \
+  --watermark false
+
+# 2) Seededit 3.0 i2i: single source image edit
+python -m src.ark_image_cli \
+  --model doubao-seededit-3-0-i2i-250628 \
+  --prompt "改成爱心形状的泡泡" \
+  --images input/source.jpeg \
+  --seed 123 \
+  --guidance-scale 5.5 \
+  --size adaptive \
+  --response-format url \
+  --watermark true
+
+# 3) Get two results by repeating client calls
+python -m src.ark_image_cli \
+  --model doubao-seedream-4-0-250828 \
+  --prompt "蓝色金属漆，现代感" \
+  --images input/sketch.png \
+  --count 2 \
+  --response-format url
+
+# ---
+# Workflow wrapper examples
+
+# A) TextToImage via workflow (4 images, serial count; default size=4K)
+python -m src.workflow.cli \
+  --interface TextToImage \
+  --prompt-mode custom \
+  --custom-prompt "蓝色金属漆，现代感" \
+  --num-candidates 4 \
+  --response-format url \
+  --watermark false
+
+# B) SketchTo3D via workflow (4 images, concurrent; default size=4K)
+python -m src.workflow.cli \
+  --interface SketchTo3D \
+  --prompt-mode custom \
+  --custom-prompt "以线稿为基础生成高保真3D" \
+  --primary-image examples/草稿.jpg \
+  --num-candidates 4 \
+  --concurrency \
+  --size 2K
+
+# C) FusionRandomize with varying seeds (3 images, concurrent; default size=4K)
+python -m src.workflow.cli \
+  --interface FusionRandomize \
+  --prompt-mode custom \
+  --custom-prompt "融合现代感与肌肉感" \
+  --primary-image examples/AI生成-1.jpg \
+  --ref-images examples/型改-1.jpg \
+  --num-candidates 3 \
+  --concurrency

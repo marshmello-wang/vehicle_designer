@@ -1,0 +1,11 @@
+[ark]
+base_url = "https://ark.cn-beijing.volces.com/api/v3"
+# Prefer setting via config; fallback environment variable: ARK_API_KEY
+api_key = "<YOUR_ARK_API_KEY>"
+timeout = 60
+
+[defaults]
+output_dir = "outputs"
+# default model if --model not provided
+model = "doubao-seedream-4-0-250828"
+
