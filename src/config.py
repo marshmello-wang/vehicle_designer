@@ -28,8 +28,8 @@ def load_config(path: str = "config.toml") -> ArkConfig:
 
     base_url = ark.get("base_url", "https://ark.cn-beijing.volces.com/api/v3")
     # Prefer config value; fallback to env ARK_API_KEY
-    # api_key = ark.get("api_key") or os.environ.get("ARK_API_KEY")
-    api_key = ark.get("api_key") or "3c776884-2809-4ab8-853e-af241319e6c9"
+    api_key = ark.get("api_key") or os.environ.get("ARK_API_KEY")
+    # api_key = ark.get("api_key") or ""
     timeout = int(ark.get("timeout", 60))
     output_dir = defaults.get("output_dir", "outputs")
     default_model = defaults.get("model")

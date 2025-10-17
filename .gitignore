@@ -1,2 +1,4 @@
 outputs
 .venv
+run_test.sh
+run.sh

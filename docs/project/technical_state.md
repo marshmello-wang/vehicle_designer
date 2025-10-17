@@ -96,12 +96,53 @@
 - **关系类型**: 1:1（串行模式）或 1:N（并发模式）
 - **关系描述**: 每次 CLI 调用对应一份元数据快照
 
-### 3.3 存储方案
+### 3.3 存储方案（后端 API）
 
-#### `Metadata`/`OutputImage` 存储
-**存储介质**: 本地文件系统 `outputs/`
+#### 3.3.1 Supabase（Postgres）表结构
+用于保存 Project/Version 与版本图片（MVP：直接存 base64）。
 
-**Schema定义**（示例片段）:
+建议 DDL（可在 Supabase SQL 编辑器执行，见 `docs/project/schema.sql`）：
+```sql
+-- project
+create table if not exists public.project (
+  id uuid primary key default gen_random_uuid(),
+  name text null,
+  created_at timestamptz not null default now()
+);
+
+-- version
+create table if not exists public.version (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.project(id) on delete cascade,
+  parent_version_id uuid null references public.version(id) on delete set null,
+  index int not null,
+  interface_name text not null,
+  image_mime text not null,
+  image_base64 text not null,
+  created_at timestamptz not null default now(),
+  constraint version_index_unique unique (project_id, index)
+);
+
+create index if not exists idx_version_project_index on public.version(project_id, index asc);
+```
+
+实现与约束：
+- 代码中在应用层计算 `index=latest(project)+1` 并写入（`app/db.py:version_insert`）。
+- `parent_version_id` 形成版本链；回退时复制目标版本内容创建新行并指向其为父。
+- `image_base64`、`image_mime` 按原样存储；后续可迁移到 Supabase Storage 并仅存 URL。
+
+环境变量：
+- `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY` 必填（服务端直连 Postgres）。
+- 测试环境内置内存假实现（`tests/conftest.py` 自动注入），无需真实连接。
+
+数据流：
+- 生成候选阶段不入库，仅返回 base64 列表给前端。
+- “提交为版本”阶段将所选 base64 与元字段写入 `version` 表。
+
+#### 3.3.2 CLI 元数据与输出（可选）
+工作流/CLI 路径会在本地 `outputs/` 写入元数据与图片（若启用）。
+
+示例 meta 片段：
 ```json
 {
   "model": "doubao-seedream-4-0-250828",
@@ -201,3 +242,70 @@
 - **网络依赖**: 受外部 Ark 服务稳定性与网络状况影响；应对策略为超时、重试与失败回报
 - **种子策略**: `FusionRandomize` 默认 varying seeds 增加多样性，其它接口固定 seed 提升复现性
 
+---
+
+## 7. 后端 API（FastAPI）
+
+基础信息
+- 服务入口：`app/main.py`（FastAPI）。
+- 路由模块：`app/routes/projects.py`、`app/routes/generate.py`、`app/routes/versions.py`。
+- Schema：`app/schemas.py`。
+- Ark 接入：`app/ark.py`（`ARK_FAKE_MODE` 控制真假实现）。
+
+环境变量
+- `ARK_API_KEY`（必需以启用真实 Ark）、`ARK_BASE_URL`（可选，默认北京三）、`ARK_FAKE_MODE`（默认 true）。
+- `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`（版本存储，测试环境已内置内存假实现）。
+
+项目管理
+- POST `/api/projects/create`
+  - Body: `{ "name"?: string }`
+  - 200: `ProjectOut { project_id, name, created_at, version_count=0 }`
+- GET `/api/projects`
+  - 200: `ProjectOut[]`（包含 `version_count` 实时统计）
+- GET `/api/projects/{project_id}`
+  - 200: `ProjectOut`
+  - 404: 项目不存在
+
+生成候选（不入库）
+- 通用请求体（四类共享）`GenerateCommon`
+  - `prompt_mode: "template"|"custom"`
+  - 当 `template`：`template_key: string`, `template_params: object`
+  - 当 `custom`：`custom_prompt: string`
+  - `primary_image?: { base64: string, mime?: "image/png"|"image/jpeg" }`
+  - `ref_images?: Array<{ base64: string, mime?: string }>`（0–2）
+  - `num_candidates?: number`（默认 4）
+  - `ark?: { size?, seed?, guidance_scale?, sequential_image_generation?, response_format?, watermark?, model?, param?, json_params? }`
+- 响应体 `CandidatesOut`
+  - `candidates: Array<{ base64: string, mime: string }>`
+  - `metadata: object`（包含接口名/模板信息/ark 透传等）
+- 端点
+  - POST `/api/projects/{project_id}/generate/text-to-image`
+    - 仅文本，`primary_image/ref_images` 不使用
+  - POST `/api/projects/{project_id}/generate/sketch-to-3d`
+    - 需要 `primary_image`
+  - POST `/api/projects/{project_id}/generate/fusion-randomize`
+    - 需要 `primary_image`，`ref_images` 0–2；未指定 `seed` 时每张候选使用不同 `seed`
+  - POST `/api/projects/{project_id}/generate/refine-edit`
+    - 需要 `primary_image`，`ref_images` 可选
+- 错误
+  - 422：模板/自定义提示词缺失、图片必填缺失、图片数量超限等
+  - 500：真实 Ark 请求失败（当 `ARK_FAKE_MODE=false`）
+
+版本管理（入库）
+- POST `/api/projects/{project_id}/versions/create`
+  - Body: `SubmitVersionIn { image: {base64,mime}, interface_name, base_version_id?, ... }`
+  - 200: `SubmitVersionOut { project_id, version:{id,index}, image, interface_name }`
+  - 404: 项目/基线版本不存在
+- GET `/api/projects/{project_id}/versions`
+  - 200: `VersionOutBrief[] { id,index,parent_version_id,interface_name,created_at }`
+- GET `/api/projects/{project_id}/versions/{version_id}`
+  - 200: `VersionDetailOut { id,index,parent_version_id,interface_name,image }`
+  - 404: 版本不存在或不属于该项目
+- POST `/api/projects/{project_id}/versions/{version_id}/revert`
+  - 200: `SubmitVersionOut`（复制目标版本内容形成新版本，`index` 递增）
+  - 404: 项目/版本不存在
+
+实现要点
+- generate/* 仅返回候选，不入库；提交版本由 `/versions/create` 完成。
+- Ark 字段名与语义保持一致，统一置于 `ark` 对象透传；服务端默认值：`size=4K`、`sequential_image_generation=disabled`、`response_format=url`、`watermark=false`。
+- `FusionRandomize` 默认使用 varying seeds（未显式传 seed 时）。
